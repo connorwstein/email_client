@@ -17,4 +17,3 @@ gcc -lssl -lcrypto -lsasl2 -Wno-deprecated smtp_client.c -o client
 
 
 
-# email_client
