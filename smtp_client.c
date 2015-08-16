@@ -142,7 +142,8 @@ char *ssl_read(ssl_socket *my_ssl_socket)
 			return result;
 		}
 		else{
-			fprintf(stderr, "Error reading from socked, receivied less than or equal to zero bytes\n");
+			fprintf(stderr, "Error reading from socket, receivied %d bytes\n",bytes_received);
+			return NULL;
 		}
 	}
 	return result;
@@ -193,20 +194,24 @@ int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
 	if(encoded_auth==NULL){
 		return -1;
 	}
-	if(strstr(ssl_read(my_ssl_socket),"220")==NULL){
+	char *read;
+	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"220")==NULL){
 		printf("Fail to obtain 220 smtp code\n");
+		free(read);
 		return -1;
 	}
 	SSL_write(my_ssl_socket->ssl_sockfd,EHLO, strlen(EHLO));
-	if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
+	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
 		printf("Fail to obtain 250 smtp code\n");
+		free(read);
 		return -1;
 	}
 	char login[200];
 	sprintf(login,"%s %s\r\n","AUTH PLAIN", encoded_auth);
 	SSL_write(my_ssl_socket->ssl_sockfd,login, strlen(login));
-	if(strstr(ssl_read(my_ssl_socket),"235")==NULL){
+	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"235")==NULL){
 		printf("Fail to obtain 235 smtp code when authenicating\n");
+		free(read);
 		return -1;
 	}
 	return 0;
@@ -240,9 +245,14 @@ char *generate_auth_plain_base64(char* email_address, char* password){
 int main(int argc, char *argv[]){
 
 	int sockfd=tcp_connect("smtp.gmail.com", "465");
+	struct timeval timeout;      
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+	if (setsockopt (sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout)) < 0) perror("setsockopt failed\n");
 	ssl_init();
 	//Create SSL layer on top of TCP
 	ssl_socket *my_ssl_socket=ssl_connect(sockfd);
+	char *read;
 	int count = 0;
 	while(1){
 		char email_address[100];
@@ -254,7 +264,6 @@ int main(int argc, char *argv[]){
 			printf("\nLogin to gmail\n");
 			printf("Enter gmail address: ");
 			scanf("%s",email_address);
-			printf("\n");
 			password=getpass("Enter gmail password: ");
 			char *auth_base64=generate_auth_plain_base64(email_address ,password);
 			if(authenticate(my_ssl_socket,auth_base64)==-1){
@@ -265,33 +274,57 @@ int main(int argc, char *argv[]){
 			printf("Authenication successful\n");
 			free(auth_base64);
 		 }
-		
+		///--- Sender address ----//
 		char mail_from[200];
 		sprintf(mail_from,"%s %s\r\n","MAIL FROM: ", "<connor.stein2@gmail.com>");
-		printf("%s", mail_from);
+		//printf("%s", mail_from);
 		SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
-		if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
 			printf("Fail to obtain 250 smtp code when sending mail from command\n");
+			count++;	
+			free(read);
 			continue;
 		}
+		//-----------------------//
+		//--- Receiver address---//
 		char to_buf[200];
 		printf(">>>> TO: ");
 		scanf("%s",to_buf);
 		char to[200];
 		sprintf(to,"%s <%s>\r\n","RCPT TO:", to_buf);
-		printf("%s",to);
+		//printf("%s",to);
 		SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
-		if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
 			printf("Failed to obtain 250 smtp code when sending rcpt to command\n"); //should be 250
+			count++;	
+			free(read);
 			continue;
 		}
-		printf(">>>> COMPOSE: ");
+		//----------------------//
+		//--- Email Data ---//
+		printf(">>>> COMPOSE (~ to terminate): ");
 		SSL_write(my_ssl_socket->ssl_sockfd,"DATA\r\n", strlen("DATA\r\n"));
-		if(strstr(ssl_read(my_ssl_socket),"354")==NULL){
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"354")==NULL){
 			printf("Failed to obtain 354 smtp code when sending data command\n"); //should be 250
+			count++;	
+			free(read);
 			continue;
 		}
-
+		char data_buf[500];
+		int i=0;
+		int c;
+		while((c=getchar())!='~'){
+			data_buf[i++]=c;
+		}
+		char data[500];
+		sprintf(data, "%s\r\n.\r\n",data_buf);
+		SSL_write(my_ssl_socket->ssl_sockfd,data, strlen(data));
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
+			printf("Failed to obtain 354 smtp code when sending data command\n"); //should be 250
+			count++;	
+			free(read);
+			continue;
+		}
 		count++;
 	}
 	
