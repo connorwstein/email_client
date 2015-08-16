@@ -8,18 +8,39 @@
 #include <arpa/inet.h> //inet_ntop
 #include <math.h>
 
- #include <sasl/saslutil.h> //for SASL_OK
+#include <sasl/saslutil.h> //for SASL_OK
 
 #include <openssl/ssl.h> //for ssl stuff
 #include <openssl/err.h> //for the SSL_load_error_strings()
 
-#define EHLO "EHLO\r\n"
+#include "smtp_client.h"
 
-typedef struct {
-	int sockfd;
-	SSL *ssl_sockfd;
-	SSL_CTX *ssl_context;
-}ssl_socket;
+//SMTP commands
+#define SMTP_EHLO "EHLO\r\n"
+#define SMTP_MAIL_FROM "MAIL FROM:"
+#define SMTP_RCPT_TO "RCPT TO:"
+#define SMTP_DATA "DATA\r\n"
+#define SMTP_EMAIL_TERMINATOR "\r\n.\r\n"
+#define SMTP_COMMAND_TERMINATOR "\r\n"
+#define SMTP_AUTH_PLAIN "AUTH PLAIN"
+#define SMTP_QUIT "quit\r\n"
+
+//SMTP response codes
+#define SMTP_SERVICE_READY "220"
+#define SMTP_REQUESTED_MAIL_ACTION_OK "250"
+#define SMTP_START_MAIL_INPUT "354"
+#define SMTP_AUTHENTICATION_SUCCESSFUL "235" //note this is an extension to smtp see rfc 4954
+#define SMTP_CLOSING_CONNECTION "221"
+
+//Gmail
+#define GMAIL_SERVER "smtp.gmail.com"
+#define GMAIL_PORT "465"
+#define GMAIL_DOMAIN "@gmail.com"
+
+//Email parameters
+#define MAX_ADDRESS 100
+#define MAX_LOGIN_AUTH 1000
+#define MAX_EMAIL 1000
 
 //Returns a socket file descriptor
 int tcp_connect(char* host, char* port){
@@ -68,11 +89,6 @@ int tcp_connect(char* host, char* port){
         	fprintf(stderr, "Unable to create socket\n");
         	goto next;
         };
-        // //Bind it to the port passed into getaddrinfo, not necessary if we are a client and dont care about our local port
-        // if(bind(sockfd, p->ai_addr, p->ai_addrlen)==-1){
-        // 	fprintf(stderr,"Unable to bind socket\n");
-        // 	goto next;
-        // }
         if(connect(sockfd, p->ai_addr, p->ai_addrlen)!=-1){
         	//successful connection, do not need to check other results from getinfoaddr
         	break;
@@ -123,10 +139,10 @@ ssl_socket* ssl_connect(int sockfd){
 	return my_ssl_socket;
 }
 
-// Read all available text from the connection, maximum 1024 bytes
+// Read all available text from the connection, maximum 1024 bytes, assume smtp responses would never be larger than this
 char *ssl_read(ssl_socket *my_ssl_socket)
 {
-	const int MAX_READ_BUF_SIZE = 1024;
+	const int MAX_READ_BUF_SIZE = 1024; 
 	char *result= NULL;
 	int bytes_received;
 	char read_buffer[MAX_READ_BUF_SIZE];
@@ -136,81 +152,43 @@ char *ssl_read(ssl_socket *my_ssl_socket)
 		bytes_received=SSL_read(my_ssl_socket->ssl_sockfd,read_buffer,MAX_READ_BUF_SIZE);
 		//printf("Read buffer: %s\n",read_buffer);
 		if(bytes_received>0){
-			result=malloc(bytes_received*sizeof(char)+1); //+1 for the null byte to make a string
+			result=(char*)malloc(bytes_received*sizeof(char)+1); //+1 for the null byte to make a string
 			memcpy(result, read_buffer,bytes_received);
 			*(result+bytes_received)='\0'; //make it a string
 			return result;
 		}
 		else{
 			fprintf(stderr, "Error reading from socket, receivied %d bytes\n",bytes_received);
+			//printf("SSL error: %d\n",SSL_get_error(my_ssl_socket->ssl_sockfd, bytes_received));
 			return NULL;
 		}
 	}
 	return result;
 }
 
-// int send_email(ssl_socket *my_ssl_socket){
-// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 220
-	
-// 	char *init="EHLO\r\n";
-// 	printf("%s",init);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,init, strlen(init));
-// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 250
-	
-// 	char *login="AUTH PLAIN AGNvbm5vci5zdGVpbjJAZ21haWwuY29tAGdvbzFuZ0MwbiMxMg==\r\n";
-// 	printf("%s",login);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,login, strlen(login));
-// 	printf("Read: %s\n",ssl_read(my_ssl_socket));
-	
-// 	char *mail_from="MAIL FROM: <connor.stein2@gmail.com>\r\n";
-// 	printf("%s",mail_from);
-// 	SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
-// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
-
-// 	char *to="rcpt to: <connor.stein2@gmail.com>\r\n";
-// 	printf("%s",to);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
-// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 250
-
-// 	char *data="DATA\r\n";
-// 	printf("%s",data);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,data, strlen(data));
-// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 354
-
-// 	char *test_email="Subject: Hello World\nCommand line email baby!\r\n.\r\n";
-// 	printf("%s",test_email);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,test_email, strlen(test_email));
-// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
-
-// 	char *close="quit\r\n";
-// 	printf("%s",close);
-// 	SSL_write(my_ssl_socket->ssl_sockfd,close, strlen(close));
-// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 221
-
-// 	ssl_close(my_ssl_socket);
-// }
-
-int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
+int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth, int first_try){
 	if(encoded_auth==NULL){
 		return -1;
 	}
 	char *read;
-	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"220")==NULL){
-		printf("Fail to obtain 220 smtp code\n");
+	//Note only check for the service ready on the first authentication try
+	//Otherwise the socket will timeout 
+	if(first_try&&((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_SERVICE_READY)==NULL)){
+		printf("SMTP service not ready\n");
 		free(read);
 		return -1;
 	}
-	SSL_write(my_ssl_socket->ssl_sockfd,EHLO, strlen(EHLO));
-	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
-		printf("Fail to obtain 250 smtp code\n");
+	SSL_write(my_ssl_socket->ssl_sockfd,SMTP_EHLO, strlen(SMTP_EHLO));
+	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_REQUESTED_MAIL_ACTION_OK)==NULL){
+		printf("SMTP requested mail action not ok\n");
 		free(read);
 		return -1;
 	}
-	char login[200];
-	sprintf(login,"%s %s\r\n","AUTH PLAIN", encoded_auth);
+	char login[MAX_LOGIN_AUTH];
+	sprintf(login,"%s %s%s",SMTP_AUTH_PLAIN, encoded_auth,SMTP_COMMAND_TERMINATOR);
 	SSL_write(my_ssl_socket->ssl_sockfd,login, strlen(login));
-	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"235")==NULL){
-		printf("Fail to obtain 235 smtp code when authenicating\n");
+	if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_AUTHENTICATION_SUCCESSFUL)==NULL){
+		printf("SMTP authentication failed\n");
 		free(read);
 		return -1;
 	}
@@ -219,7 +197,7 @@ int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
 
 char *generate_auth_plain_base64(char* email_address, char* password){
 	BIO *bio, *b64;
-	char message[200];
+	char message[MAX_LOGIN_AUTH];
 	memset(message, 0, sizeof(message));
 	int email_address_length=strlen(email_address);
 	int password_length=strlen(password);
@@ -244,7 +222,8 @@ char *generate_auth_plain_base64(char* email_address, char* password){
 
 int main(int argc, char *argv[]){
 
-	int sockfd=tcp_connect("smtp.gmail.com", "465");
+	int sockfd=tcp_connect(GMAIL_SERVER, GMAIL_PORT);
+	//Set socket timeout 
 	struct timeval timeout;      
     timeout.tv_sec = 5;
     timeout.tv_usec = 0;
@@ -254,48 +233,55 @@ int main(int argc, char *argv[]){
 	ssl_socket *my_ssl_socket=ssl_connect(sockfd);
 	char *read;
 	int count = 0;
+	int first_try=1; //for authentication, the first try is different then the others in terms of commands
 	while(1){
-		char email_address[100];
+		char email_address[MAX_ADDRESS];
 		memset(email_address, 0, sizeof(email_address));
-		 if(count==0){
-			char email_address[100];
+		if(count==0){
+			char email_address[MAX_ADDRESS];
 			memset(email_address, 0, sizeof(email_address));
 			char *password;
 			printf("\nLogin to gmail\n");
 			printf("Enter gmail address: ");
 			scanf("%s",email_address);
+			if(strstr(email_address,GMAIL_DOMAIN)==NULL){
+				printf("Not a valid gmail account\n");
+				continue;
+			}
 			password=getpass("Enter gmail password: ");
 			char *auth_base64=generate_auth_plain_base64(email_address ,password);
-			if(authenticate(my_ssl_socket,auth_base64)==-1){
+			if(authenticate(my_ssl_socket,auth_base64,first_try)==-1){
 				printf("Failed to authenticate");
+				first_try=0;
 				count=0;
+				free(auth_base64);
 				continue;
 			}
 			printf("Authenication successful\n");
 			free(auth_base64);
-		 }
+		}
 		///--- Sender address ----//
-		char mail_from[200];
-		sprintf(mail_from,"%s %s\r\n","MAIL FROM: ", "<connor.stein2@gmail.com>");
+		char mail_from[MAX_ADDRESS];
+		sprintf(mail_from,"%s <%s>%s",SMTP_MAIL_FROM, email_address,SMTP_COMMAND_TERMINATOR);
 		//printf("%s", mail_from);
 		SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
-		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
-			printf("Fail to obtain 250 smtp code when sending mail from command\n");
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_REQUESTED_MAIL_ACTION_OK)==NULL){
+			printf("SMTP requested mail action not ok\n");
 			count++;	
 			free(read);
 			continue;
 		}
 		//-----------------------//
 		//--- Receiver address---//
-		char to_buf[200];
+		char to_buf[MAX_ADDRESS];
 		printf(">>>> TO: ");
 		scanf("%s",to_buf);
-		char to[200];
-		sprintf(to,"%s <%s>\r\n","RCPT TO:", to_buf);
+		char to[MAX_ADDRESS];
+		sprintf(to,"%s <%s>%s",SMTP_RCPT_TO, to_buf, SMTP_COMMAND_TERMINATOR);
 		//printf("%s",to);
 		SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
-		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
-			printf("Failed to obtain 250 smtp code when sending rcpt to command\n"); //should be 250
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_REQUESTED_MAIL_ACTION_OK)==NULL){
+			printf("SMTP requested mail action not ok\n"); 
 			count++;	
 			free(read);
 			continue;
@@ -303,30 +289,31 @@ int main(int argc, char *argv[]){
 		//----------------------//
 		//--- Email Data ---//
 		printf(">>>> COMPOSE (~ to terminate): ");
-		SSL_write(my_ssl_socket->ssl_sockfd,"DATA\r\n", strlen("DATA\r\n"));
-		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"354")==NULL){
-			printf("Failed to obtain 354 smtp code when sending data command\n"); //should be 250
+		SSL_write(my_ssl_socket->ssl_sockfd,SMTP_DATA, strlen(SMTP_DATA));
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_START_MAIL_INPUT)==NULL){
+			printf("Failed to start mail input\n"); 
 			count++;	
 			free(read);
 			continue;
 		}
-		char data_buf[500];
-		int i=0;
-		int c;
+		char data_buf[MAX_EMAIL];
+		int i=0, c;
+		//Note want to allow for newlines and spaces so cannot use scanf (without regexs)
+		//fgets doesnt seem to wait for input
 		while((c=getchar())!='~'){
 			data_buf[i++]=c;
 		}
-		char data[500];
-		sprintf(data, "%s\r\n.\r\n",data_buf);
-		SSL_write(my_ssl_socket->ssl_sockfd,data, strlen(data));
-		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,"250")==NULL){
-			printf("Failed to obtain 354 smtp code when sending data command\n"); //should be 250
+		char data[MAX_EMAIL];
+		sprintf(data_buf, "%s%s",data_buf,SMTP_EMAIL_TERMINATOR);
+		SSL_write(my_ssl_socket->ssl_sockfd,data_buf, strlen(data_buf));
+		if((read=ssl_read(my_ssl_socket))==NULL||strstr(read,SMTP_REQUESTED_MAIL_ACTION_OK)==NULL){
+			printf("SMTP requested mail action not ok\n"); 
 			count++;	
 			free(read);
 			continue;
 		}
 		count++;
 	}
-	
+	free(my_ssl_socket);
 	return 0;
 }
