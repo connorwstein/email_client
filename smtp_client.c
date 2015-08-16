@@ -12,87 +12,6 @@
 
 #include <openssl/ssl.h> //for ssl stuff
 #include <openssl/err.h> //for the SSL_load_error_strings()
-// 	struct addrinfo {
-//     int              ai_flags;     // AI_PASSIVE, AI_CANONNAME, etc.
-//     int              ai_family;    // AF_INET, AF_INET6, AF_UNSPEC
-//     int              ai_socktype;  // SOCK_STREAM, SOCK_DGRAM
-//     int              ai_protocol;  // use 0 for "any"
-//     size_t           ai_addrlen;   // size of ai_addr in bytes
-//     struct sockaddr *ai_addr;      // struct sockaddr_in or _in6
-//     char            *ai_canonname; // full canonical hostname
-
-//     struct addrinfo *ai_next;      // linked list, next node
-// };
-
-// struct sockaddr {
-//     unsigned short    sa_family;    // address family, AF_xxx
-//     char              sa_data[14];  // 14 bytes of protocol address, destination address and port number of socket
-// }; 
-
-
-// (IPv4 only--see struct sockaddr_in6 for IPv6)
-// struct sockaddr_in {
-//     short int          sin_family;  // Address family, AF_INET
-//     unsigned short int sin_port;    // Port number, should be in network byte order, using htons()
-//     struct in_addr     sin_addr;    // Internet address
-//     unsigned char      sin_zero[8]; // Same size as struct sockadd, used to pad the structure to the length of sockaddr
-// };
-// (IPv4 only--see struct in6_addr for IPv6)
-// Internet address (a structure for historical reasons)
-// struct in_addr {
-//     uint32_t s_addr; // that's a 32-bit int (4 bytes)
-// };
-
-
-// (IPv6 only--see struct sockaddr_in and struct in_addr for IPv4)
-// struct sockaddr_in6 {
-//     u_int16_t       sin6_family;   // address family, AF_INET6
-//     u_int16_t       sin6_port;     // port number, Network Byte Order
-//     u_int32_t       sin6_flowinfo; // IPv6 flow information
-//     struct in6_addr sin6_addr;     // IPv6 address
-//     u_int32_t       sin6_scope_id; // Scope ID
-// };
-// struct in6_addr {
-//     unsigned char   s6_addr[16];   // IPv6 address
-// };
-
-//Use this if you are not sure whether it is going to be v4 or v6
-// address family in the ss_family field—check this to see if it's AF_INET or AF_INET6 (for IPv4 or IPv6)
-// Then you can cast it to a struct sockaddr_in or struct sockaddr_in6 if you wanna.
-// 	struct sockaddr_storage {
-//     sa_family_t  ss_family;     // address family
-
-//     // all this is padding, implementation specific, ignore it:
-//     char      __ss_pad1[_SS_PAD1SIZE];
-//     int64_t   __ss_align;
-//     char      __ss_pad2[_SS_PAD2SIZE];
-// };
-
-
-/* ---------   String --> struct sockaddr  --------------------- */
-// struct sockaddr_in sa; // IPv4
-// struct sockaddr_in6 sa6; // IPv6
-// inet_pton(AF_INET, "192.0.2.1", &(sa.sin_addr)); // IPv4
-// inet_pton(AF_INET6, "2001:db8:63b3:1::3490", &(sa6.sin6_addr)); // IPv6
-/* -------------------------------------------------------------*/
-
-/* ---------  struct sockaddr --> String  --------------------- */
-// // IPv4:
-// char ip4[INET_ADDRSTRLEN];  // space to hold the IPv4 string
-// struct sockaddr_in sa;      // pretend this is loaded with something
-// inet_ntop(AF_INET, &(sa.sin_addr), ip4, INET_ADDRSTRLEN);
-// printf("The IPv4 address is: %s\n", ip4);
-// // IPv6:
-// char ip6[INET6_ADDRSTRLEN]; // space to hold the IPv6 string
-// struct sockaddr_in6 sa6;    // pretend this is loaded with something
-// inet_ntop(AF_INET6, &(sa6.sin6_addr), ip6, INET6_ADDRSTRLEN);
-// printf("The address is: %s\n", ip6);
-/* -------------------------------------------------------------*/
-
-// //int getaddrinfo(const char *node,     // e.g. "www.example.com" or IP
- //                const char *service,  // e.g. "http" or port number
- //                const struct addrinfo *hints,
- //                struct addrinfo **res); //res is the results, linked list 
 
 #define EHLO "EHLO\r\n"
 
@@ -142,7 +61,7 @@ int tcp_connect(char* host, char* port){
         }
         // convert the IP to a string and print it:
         inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-        printf("  %s: %s\n", ipver, ipstr);
+        printf("Gmail server %s: %s\n", ipver, ipstr);
 
         //Create a socket for given infoaddr
         if((sockfd=socket(p->ai_family, p->ai_socktype, p->ai_protocol))==-1){
@@ -229,46 +148,46 @@ char *ssl_read(ssl_socket *my_ssl_socket)
 	return result;
 }
 
-int send_email(ssl_socket *my_ssl_socket){
-	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 220
+// int send_email(ssl_socket *my_ssl_socket){
+// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 220
 	
-	char *init="EHLO\r\n";
-	printf("%s",init);
-	SSL_write(my_ssl_socket->ssl_sockfd,init, strlen(init));
-	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 250
+// 	char *init="EHLO\r\n";
+// 	printf("%s",init);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,init, strlen(init));
+// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //Should read smtp code 250
 	
-	char *login="AUTH PLAIN AGNvbm5vci5zdGVpbjJAZ21haWwuY29tAGdvbzFuZ0MwbiMxMg==\r\n";
-	printf("%s",login);
-	SSL_write(my_ssl_socket->ssl_sockfd,login, strlen(login));
-	printf("Read: %s\n",ssl_read(my_ssl_socket));
+// 	char *login="AUTH PLAIN AGNvbm5vci5zdGVpbjJAZ21haWwuY29tAGdvbzFuZ0MwbiMxMg==\r\n";
+// 	printf("%s",login);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,login, strlen(login));
+// 	printf("Read: %s\n",ssl_read(my_ssl_socket));
 	
-	char *mail_from="MAIL FROM: <connor.stein2@gmail.com>\r\n";
-	printf("%s",mail_from);
-	SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
-	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
+// 	char *mail_from="MAIL FROM: <connor.stein2@gmail.com>\r\n";
+// 	printf("%s",mail_from);
+// 	SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
+// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
 
-	char *to="rcpt to: <connor.stein2@gmail.com>\r\n";
-	printf("%s",to);
-	SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
-	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 250
+// 	char *to="rcpt to: <connor.stein2@gmail.com>\r\n";
+// 	printf("%s",to);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
+// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 250
 
-	char *data="DATA\r\n";
-	printf("%s",data);
-	SSL_write(my_ssl_socket->ssl_sockfd,data, strlen(data));
-	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 354
+// 	char *data="DATA\r\n";
+// 	printf("%s",data);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,data, strlen(data));
+// 	printf("Read: %s\n",ssl_read(my_ssl_socket)); //should be 354
 
-	char *test_email="Subject: Hello World\nCommand line email baby!\r\n.\r\n";
-	printf("%s",test_email);
-	SSL_write(my_ssl_socket->ssl_sockfd,test_email, strlen(test_email));
-	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
+// 	char *test_email="Subject: Hello World\nCommand line email baby!\r\n.\r\n";
+// 	printf("%s",test_email);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,test_email, strlen(test_email));
+// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 250
 
-	char *close="quit\r\n";
-	printf("%s",close);
-	SSL_write(my_ssl_socket->ssl_sockfd,close, strlen(close));
-	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 221
+// 	char *close="quit\r\n";
+// 	printf("%s",close);
+// 	SSL_write(my_ssl_socket->ssl_sockfd,close, strlen(close));
+// 	printf("Read: %s\n", ssl_read(my_ssl_socket)); //should be 221
 
-	ssl_close(my_ssl_socket);
-}
+// 	ssl_close(my_ssl_socket);
+// }
 
 int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
 	if(encoded_auth==NULL){
@@ -278,9 +197,7 @@ int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
 		printf("Fail to obtain 220 smtp code\n");
 		return -1;
 	}
-	char *init="EHLO\r\n";
-	printf("%s",init);
-	SSL_write(my_ssl_socket->ssl_sockfd,init, strlen(init));
+	SSL_write(my_ssl_socket->ssl_sockfd,EHLO, strlen(EHLO));
 	if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
 		printf("Fail to obtain 250 smtp code\n");
 		return -1;
@@ -292,6 +209,7 @@ int authenticate(ssl_socket* my_ssl_socket, char* encoded_auth){
 		printf("Fail to obtain 235 smtp code when authenicating\n");
 		return -1;
 	}
+	return 0;
 }
 
 char *generate_auth_plain_base64(char* email_address, char* password){
@@ -315,10 +233,7 @@ char *generate_auth_plain_base64(char* email_address, char* password){
 		//printf("successful encode: %s\n",buffer);
 		return buffer;
 	}
-	else{
-		return NULL;
-	}
-	
+	return NULL;
 }
 
 
@@ -333,15 +248,15 @@ int main(int argc, char *argv[]){
 		char email_address[100];
 		memset(email_address, 0, sizeof(email_address));
 		 if(count==0){
-		// 	char email_address[100];
-		// 	memset(email_address, 0, sizeof(email_address));
-		// 	char *password;
-		// 	printf("\nLogin to gmail\n");
-		// 	printf("Enter gmail address: ");
-		// 	scanf("%s",email_address);
-		// 	printf("\n");
-		// 	password=getpass("Enter gmail password: ");
-			char *auth_base64=generate_auth_plain_base64("connor.stein2@gmail.com" ,"goo1ngC0n#12");
+			char email_address[100];
+			memset(email_address, 0, sizeof(email_address));
+			char *password;
+			printf("\nLogin to gmail\n");
+			printf("Enter gmail address: ");
+			scanf("%s",email_address);
+			printf("\n");
+			password=getpass("Enter gmail password: ");
+			char *auth_base64=generate_auth_plain_base64(email_address ,password);
 			if(authenticate(my_ssl_socket,auth_base64)==-1){
 				printf("Failed to authenticate");
 				count=0;
@@ -349,14 +264,11 @@ int main(int argc, char *argv[]){
 			}
 			printf("Authenication successful\n");
 			free(auth_base64);
-			// printf("\n");
-			// printf("%s %s\n", email_address, password);
-			// generate_auth_plain_base64(email_address, password);
 		 }
 		
 		char mail_from[200];
 		sprintf(mail_from,"%s %s\r\n","MAIL FROM: ", "<connor.stein2@gmail.com>");
-		// printf("%s", mail_from);
+		printf("%s", mail_from);
 		SSL_write(my_ssl_socket->ssl_sockfd, mail_from, strlen(mail_from));
 		if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
 			printf("Fail to obtain 250 smtp code when sending mail from command\n");
@@ -367,7 +279,7 @@ int main(int argc, char *argv[]){
 		scanf("%s",to_buf);
 		char to[200];
 		sprintf(to,"%s <%s>\r\n","RCPT TO:", to_buf);
-		// printf("%s",to);
+		printf("%s",to);
 		SSL_write(my_ssl_socket->ssl_sockfd,to, strlen(to));
 		if(strstr(ssl_read(my_ssl_socket),"250")==NULL){
 			printf("Failed to obtain 250 smtp code when sending rcpt to command\n"); //should be 250
@@ -379,6 +291,7 @@ int main(int argc, char *argv[]){
 			printf("Failed to obtain 354 smtp code when sending data command\n"); //should be 250
 			continue;
 		}
+
 		count++;
 	}
 	
